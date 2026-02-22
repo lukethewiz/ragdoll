@@ -26,6 +26,7 @@
     .type-btn:active { opacity: 0.8; }
     canvas { display: block; touch-action: none; }
     #blood-canvas { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 5; }
+    #shader-canvas { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 6; }
 
     /* --- Main menu --- */
     #menu {
@@ -273,6 +274,14 @@
       </div>
 
       <div class="setting-row">
+        <span class="setting-label">Shaders</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="set-shaders" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
         <span class="setting-label">Gravity</span>
         <div class="setting-control-col">
           <input type="range" id="set-gravity" min="0.2" max="3" step="0.1" value="1.5">
@@ -312,6 +321,7 @@
   </div>
 
   <canvas id="blood-canvas"></canvas>
+  <canvas id="shader-canvas"></canvas>
   <div id="ui" style="display:none">Tap to spawn &bull; Drag to fling</div>
   <div id="controls" style="display:none">
     <div class="row-label">Ragdolls</div>
@@ -329,8 +339,10 @@
     // --- Settings state ---
     let soundEnabled = true;
     let bloodEnabled = true;
+    let shadersEnabled = true;
     let ragdollLimit = Infinity;
     let spawnedProps = [];
+    let shaderImpact = 0;
 
     // --- Blood system ---
     const bloodCanvas = document.getElementById('blood-canvas');
@@ -868,6 +880,7 @@
 
     document.getElementById('set-sound').addEventListener('change', e => { soundEnabled = e.target.checked; });
     document.getElementById('set-blood').addEventListener('change', e => { bloodEnabled = e.target.checked; });
+    document.getElementById('set-shaders').addEventListener('change', e => { shadersEnabled = e.target.checked; });
 
     document.getElementById('set-gravity').addEventListener('input', e => {
       const val = parseFloat(e.target.value);
@@ -907,6 +920,141 @@
     Render.run(render);
     const runner = Runner.create();
     Runner.run(runner, engine);
+
+    // --- WebGL Post-processing Shader System ---
+    const shaderCanvas = document.getElementById('shader-canvas');
+    shaderCanvas.width = W;
+    shaderCanvas.height = H;
+    const gl = shaderCanvas.getContext('webgl', { premultipliedAlpha: false, alpha: false });
+
+    // Compositing canvas (offscreen) — merges game + blood before shader
+    const compCanvas = document.createElement('canvas');
+    compCanvas.width = W;
+    compCanvas.height = H;
+    const compCtx = compCanvas.getContext('2d');
+
+    const VERT_SRC = `
+      attribute vec2 aPos;
+      void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+    `;
+
+    const FRAG_SRC = `
+      precision mediump float;
+      uniform sampler2D uScene;
+      uniform vec2 uResolution;
+      uniform float uTime;
+      uniform float uImpact;
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / uResolution;
+        uv.y = 1.0 - uv.y;
+
+        // --- Impact screen warp ---
+        vec2 center = uv - 0.5;
+        float dist = length(center);
+        uv += center * uImpact * 0.025 * sin(dist * 14.0 - uTime * 22.0);
+
+        // --- Chromatic aberration (always subtle, spikes on impact) ---
+        float caStr = 0.0012 + uImpact * 0.014;
+        vec2 caDir = (uv - 0.5) * caStr;
+        float r = texture2D(uScene, uv + caDir).r;
+        float g = texture2D(uScene, uv).g;
+        float b = texture2D(uScene, uv - caDir).b;
+        vec3 color = vec3(r, g, b);
+
+        // --- Bloom approximation (5x5 bright-pass blur) ---
+        vec3 bloom = vec3(0.0);
+        for (float x = -2.0; x <= 2.0; x += 1.0) {
+          for (float y = -2.0; y <= 2.0; y += 1.0) {
+            vec2 offset = vec2(x, y) * 2.5 / uResolution;
+            vec3 s = texture2D(uScene, uv + offset).rgb;
+            float br = dot(s, vec3(0.2126, 0.7152, 0.0722));
+            bloom += s * smoothstep(0.32, 0.85, br);
+          }
+        }
+        bloom /= 25.0;
+        color += bloom * 0.55;
+
+        // --- Vignette ---
+        float vDist = distance(gl_FragCoord.xy / uResolution, vec2(0.5));
+        float vig = smoothstep(0.8, 0.35, vDist);
+        color *= mix(0.35, 1.0, vig);
+
+        // --- Subtle film grain ---
+        float grain = fract(sin(dot(gl_FragCoord.xy + uTime * 100.0, vec2(12.9898, 78.233))) * 43758.5453);
+        color += (grain - 0.5) * 0.04;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    function compileShader(src, type) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    }
+
+    let shaderProg = null, uScene, uResolution, uTime, uImpactLoc, sceneTex;
+
+    if (gl) {
+      const vs = compileShader(VERT_SRC, gl.VERTEX_SHADER);
+      const fs = compileShader(FRAG_SRC, gl.FRAGMENT_SHADER);
+      shaderProg = gl.createProgram();
+      gl.attachShader(shaderProg, vs);
+      gl.attachShader(shaderProg, fs);
+      gl.linkProgram(shaderProg);
+      gl.useProgram(shaderProg);
+
+      // Fullscreen quad
+      const quad = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+      const aPos = gl.getAttribLocation(shaderProg, 'aPos');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      // Uniforms
+      uScene = gl.getUniformLocation(shaderProg, 'uScene');
+      uResolution = gl.getUniformLocation(shaderProg, 'uResolution');
+      uTime = gl.getUniformLocation(shaderProg, 'uTime');
+      uImpactLoc = gl.getUniformLocation(shaderProg, 'uImpact');
+      gl.uniform2f(uResolution, W, H);
+
+      // Scene texture
+      sceneTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+
+    let shaderTime = 0;
+
+    function renderShader() {
+      if (!gl || !shaderProg) return;
+
+      // Composite game + blood onto offscreen canvas
+      compCtx.clearRect(0, 0, W, H);
+      compCtx.drawImage(render.canvas, 0, 0);
+      compCtx.drawImage(bloodCanvas, 0, 0);
+
+      // Upload as texture
+      gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, compCanvas);
+
+      // Update uniforms
+      shaderTime += 0.016;
+      shaderImpact *= 0.93;
+      if (shaderImpact < 0.005) shaderImpact = 0;
+      gl.uniform1f(uTime, shaderTime);
+      gl.uniform1f(uImpactLoc, shaderImpact);
+
+      // Draw
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
 
     // --- Ragdoll builder ---
     function makeRagdoll(x, y, typeName) {
@@ -1059,6 +1207,9 @@
         const cx = collision.supports[0]?.x ?? ragdoll.position.x;
         const cy = collision.supports[0]?.y ?? ragdoll.position.y;
 
+        // Feed impact into shader
+        shaderImpact = Math.min(1, shaderImpact + speed / 35);
+
         if (ragdoll.isZombie) {
           spawnDecayParticles(cx, cy, speed);
           decayZombiePart(ragdoll, speed);
@@ -1072,7 +1223,12 @@
       }
     });
 
-    Events.on(render, 'afterRender', () => { updateBlood(); drawBlood(); });
+    Events.on(render, 'afterRender', () => {
+      updateBlood();
+      drawBlood();
+      if (shadersEnabled) renderShader();
+      shaderCanvas.style.display = shadersEnabled ? 'block' : 'none';
+    });
 
     // --- Main menu logic ---
     let gameStarted = false;
