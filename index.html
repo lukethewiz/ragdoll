@@ -359,6 +359,30 @@
       }
     }
 
+    function spawnDecayParticles(x, y, speed) {
+      if (!bloodEnabled) return;
+      const count = Math.floor(6 + speed * 2);
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const v = (Math.random() * 0.5 + 0.5) * speed * 0.5;
+        const type = Math.random();
+        let color;
+        if (type < 0.4) color = `hsl(${90 + Math.random() * 30}, ${40 + Math.random() * 30}%, ${15 + Math.random() * 15}%)`;
+        else if (type < 0.7) color = `hsl(${40 + Math.random() * 20}, ${50 + Math.random() * 20}%, ${12 + Math.random() * 10}%)`;
+        else color = `hsl(${70 + Math.random() * 40}, ${20 + Math.random() * 20}%, ${8 + Math.random() * 12}%)`;
+        bloodParticles.push({
+          x, y,
+          vx: Math.cos(angle) * v,
+          vy: Math.sin(angle) * v - Math.random() * 1.5,
+          r: Math.random() * 5 + 2,
+          life: 1,
+          decay: 0.015 + Math.random() * 0.025,
+          stuck: false,
+          color
+        });
+      }
+    }
+
     function updateBlood() {
       for (let i = bloodParticles.length - 1; i >= 0; i--) {
         const p = bloodParticles[i];
@@ -450,6 +474,38 @@
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
       noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
       noise.start(t);
+    }
+
+    function playDecay(speed) {
+      if (!soundEnabled) return;
+      const ctx = getAudio();
+      const t = ctx.currentTime;
+      const vol = Math.min(1, (speed - 5) / 15);
+      // Wet crunch noise
+      const bufLen = ctx.sampleRate * 0.2;
+      const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass'; filter.frequency.value = 300;
+      filter.Q.value = 3;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(vol * 0.5, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+      noise.start(t);
+      // Low squelch tone
+      const osc = ctx.createOscillator();
+      const oscGain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(60, t);
+      osc.frequency.exponentialRampToValueAtTime(25, t + 0.15);
+      oscGain.gain.setValueAtTime(vol * 0.3, t);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      osc.connect(oscGain); oscGain.connect(ctx.destination);
+      osc.start(t); osc.stop(t + 0.15);
     }
 
     function playWhoosh() {
@@ -674,6 +730,16 @@
         restitution: 0.95,
         jointStiff: 0.4,
         colors: { head: '#ff6b6b', torso: '#ffd93d', hips: '#ffd93d', arm: '#6bcb77', legU: '#4d96ff', legL: '#845ef7' }
+      },
+      zombie: {
+        label: '🧟 Zombie',
+        scale: 1,
+        density: 0.0009,
+        friction: 0.55,
+        restitution: 0.2,
+        jointStiff: 0.8,
+        isZombie: true,
+        colors: { head: '#6b8e5a', torso: '#4a6b3a', hips: '#3d5c2e', arm: '#7a9968', legU: '#3a5c2a', legL: '#2d4a20' }
       },
     };
 
@@ -919,12 +985,18 @@
       World.add(world, [...parts, ...constraints]);
 
       const spin = (Math.random() - 0.5) * 0.3;
+      const isZombie = !!cfg.isZombie;
       parts.forEach(p => {
         Body.setAngularVelocity(p, spin);
         p.isRagdollPart = true;
+        if (isZombie) {
+          p.isZombie = true;
+          p.decayHP = 1.0;            // 1.0 = fresh, 0 = fully decayed
+          p.originalColor = p.render.fillStyle;
+        }
       });
 
-      return { parts, constraints };
+      return { parts, constraints, isZombie };
     }
 
     let ragdolls = [];
@@ -948,6 +1020,34 @@
       playWhoosh();
     }
 
+    // --- Zombie decay helpers ---
+    function lerpColor(hp) {
+      const r = Math.round(107 * hp + 50 * (1 - hp));
+      const g = Math.round(142 * hp + 40 * (1 - hp));
+      const b = Math.round(90 * hp + 30 * (1 - hp));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    function decayZombiePart(body, speed) {
+      const damage = Math.min(0.4, (speed - 3) / 25);
+      body.decayHP = Math.max(0, body.decayHP - damage);
+      body.render.fillStyle = lerpColor(body.decayHP);
+
+      // Try to detach constraints when a part is fully decayed
+      if (body.decayHP <= 0) {
+        for (const rag of ragdolls) {
+          if (!rag.isZombie) continue;
+          for (let i = rag.constraints.length - 1; i >= 0; i--) {
+            const c = rag.constraints[i];
+            if (c.bodyA === body || c.bodyB === body) {
+              World.remove(world, c);
+              rag.constraints.splice(i, 1);
+            }
+          }
+        }
+      }
+    }
+
     // --- Collision → blood + sound ---
     Events.on(engine, 'collisionStart', (event) => {
       for (const pair of event.pairs) {
@@ -958,9 +1058,17 @@
         if (speed < 3) continue;
         const cx = collision.supports[0]?.x ?? ragdoll.position.x;
         const cy = collision.supports[0]?.y ?? ragdoll.position.y;
-        spawnBlood(cx, cy, speed);
-        if (speed > 14) playSplat(speed);
-        else playThud(speed);
+
+        if (ragdoll.isZombie) {
+          spawnDecayParticles(cx, cy, speed);
+          decayZombiePart(ragdoll, speed);
+          if (speed > 10) playDecay(speed);
+          else playThud(speed);
+        } else {
+          spawnBlood(cx, cy, speed);
+          if (speed > 14) playSplat(speed);
+          else playThud(speed);
+        }
       }
     });
 
