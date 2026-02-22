@@ -1225,7 +1225,8 @@
             oldest.constraints.forEach(c => World.remove(world, c));
           }
         }
-        const rd = makeRagdoll(x, -60, currentSelection.key);
+        const spawnY = (selectedMap === 'arena') ? H - 180 : -60;
+        const rd = makeRagdoll(x, spawnY, currentSelection.key);
         if (selectedMap === 'arena') rd.isFighter = true;
         ragdolls.push(rd);
       } else {
@@ -1270,26 +1271,48 @@
       for (const rd of ragdolls) {
         if (!rd.isFighter) continue;
         const { head, torso, hips, uArmL, lArmL, uArmR, lArmR, uLegL, lLegL, uLegR, lLegR } = rd.body;
-
-        // --- Balance: keep torso upright ---
-        const angleErr = torso.angle;
-        Body.applyForce(torso, torso.position, { x: -angleErr * 0.003 * torso.mass, y: 0 });
-        Body.setAngularVelocity(torso, torso.angularVelocity * 0.92);
-
-        // Anti-gravity assist on torso+hips (partial — keeps them standing)
         const grav = engine.gravity.y;
-        Body.applyForce(torso, torso.position, { x: 0, y: -grav * torso.mass * 0.35 });
-        Body.applyForce(hips, hips.position, { x: 0, y: -grav * hips.mass * 0.2 });
 
-        // --- Leg stance: keep feet under body ---
+        // --- Strong upright balance ---
+        // Torso: correct angle toward 0 (upright)
+        Body.setAngularVelocity(torso, torso.angularVelocity * 0.8 - torso.angle * 0.12);
+        Body.setAngularVelocity(hips, hips.angularVelocity * 0.8 - hips.angle * 0.1);
+
+        // Anti-gravity on upper body so they float upright
+        Body.applyForce(head, head.position, { x: 0, y: -grav * head.mass * 0.85 });
+        Body.applyForce(torso, torso.position, { x: 0, y: -grav * torso.mass * 0.7 });
+        Body.applyForce(hips, hips.position, { x: 0, y: -grav * hips.mass * 0.55 });
+
+        // Keep head above torso
+        if (head.position.y > torso.position.y - 5) {
+          Body.applyForce(head, head.position, { x: 0, y: -0.003 * head.mass });
+        }
+
+        // Keep hips under torso horizontally
+        const hipDriftX = hips.position.x - torso.position.x;
+        Body.applyForce(hips, hips.position, { x: -hipDriftX * 0.002, y: 0 });
+
+        // --- Leg planting ---
         const hipX = hips.position.x;
-        const spread = 14;
-        const legK = 0.0004;
-        Body.applyForce(lLegL, lLegL.position, { x: (hipX - spread - lLegL.position.x) * legK, y: 0 });
-        Body.applyForce(lLegR, lLegR.position, { x: (hipX + spread - lLegR.position.x) * legK, y: 0 });
-        // Push lower legs down (stance)
-        Body.applyForce(lLegL, lLegL.position, { x: 0, y: 0.0005 });
-        Body.applyForce(lLegR, lLegR.position, { x: 0, y: 0.0005 });
+        const spread = 12;
+
+        // Upper legs: dangle down from hips, stay roughly vertical
+        Body.setAngularVelocity(uLegL, uLegL.angularVelocity * 0.85);
+        Body.setAngularVelocity(uLegR, uLegR.angularVelocity * 0.85);
+        Body.applyForce(uLegL, uLegL.position, { x: (hipX - spread - uLegL.position.x) * 0.001, y: 0.0008 });
+        Body.applyForce(uLegR, uLegR.position, { x: (hipX + spread - uLegR.position.x) * 0.001, y: 0.0008 });
+
+        // Lower legs: plant firmly downward
+        Body.setAngularVelocity(lLegL, lLegL.angularVelocity * 0.85);
+        Body.setAngularVelocity(lLegR, lLegR.angularVelocity * 0.85);
+        Body.applyForce(lLegL, lLegL.position, { x: (hipX - spread - lLegL.position.x) * 0.0008, y: 0.0012 });
+        Body.applyForce(lLegR, lLegR.position, { x: (hipX + spread - lLegR.position.x) * 0.0008, y: 0.0012 });
+
+        // --- Recovery: if knocked down (torso too tilted), try to get up ---
+        if (Math.abs(torso.angle) > 1.2) {
+          Body.applyForce(torso, torso.position, { x: 0, y: -0.008 * torso.mass });
+          Body.applyForce(hips, hips.position, { x: 0, y: -0.005 * hips.mass });
+        }
 
         // --- Find nearest enemy ---
         let nearest = null, nearDist = Infinity;
@@ -1304,32 +1327,48 @@
         const dir = Math.sign(dx);
 
         // --- Walk toward enemy ---
-        Body.applyForce(hips, hips.position, { x: dir * 0.0004 * hips.mass, y: 0 });
+        Body.applyForce(hips, hips.position, { x: dir * 0.0006 * hips.mass, y: 0 });
+        Body.applyForce(torso, torso.position, { x: dir * 0.0003 * torso.mass, y: 0 });
 
-        // Alternate leg stepping (simple walk cycle)
+        // Alternating leg steps
         rd.walkTimer = (rd.walkTimer || 0) + 1;
-        const stepping = rd.walkTimer % 40 < 20;
-        const stepLeg = stepping ? uLegL : uLegR;
-        Body.applyForce(stepLeg, stepLeg.position, { x: dir * 0.0008, y: -0.001 });
-
-        // --- Punch when close ---
-        if (nearDist < 100) {
-          rd.punchTimer = (rd.punchTimer || Math.random() * 60 | 0) + 1;
-          const phase = rd.punchTimer % 50;
-          if (phase < 6) {
-            // Left hook
-            Body.applyForce(lArmL, lArmL.position, { x: dir * 0.012, y: -0.005 });
-            Body.applyForce(uArmL, uArmL.position, { x: dir * 0.006, y: -0.002 });
-          } else if (phase > 25 && phase < 31) {
-            // Right hook
-            Body.applyForce(lArmR, lArmR.position, { x: dir * 0.012, y: -0.005 });
-            Body.applyForce(uArmR, uArmR.position, { x: dir * 0.006, y: -0.002 });
-          }
+        if (rd.walkTimer % 30 < 15) {
+          Body.applyForce(uLegL, uLegL.position, { x: dir * 0.002, y: -0.002 });
+          Body.applyForce(lLegL, lLegL.position, { x: dir * 0.001, y: -0.001 });
+        } else {
+          Body.applyForce(uLegR, uLegR.position, { x: dir * 0.002, y: -0.002 });
+          Body.applyForce(lLegR, lLegR.position, { x: dir * 0.001, y: -0.001 });
         }
 
-        // --- Occasional headbutt when very close ---
-        if (nearDist < 50 && Math.random() < 0.02) {
-          Body.applyForce(head, head.position, { x: dir * 0.015, y: -0.008 });
+        // --- Punch when close ---
+        if (nearDist < 120) {
+          rd.punchTimer = (rd.punchTimer || Math.random() * 40 | 0) + 1;
+          const phase = rd.punchTimer % 40;
+          if (phase < 8) {
+            // Left hook - strong forward swing
+            Body.applyForce(lArmL, lArmL.position, { x: dir * 0.02, y: -0.008 });
+            Body.applyForce(uArmL, uArmL.position, { x: dir * 0.01, y: -0.003 });
+          } else if (phase > 20 && phase < 28) {
+            // Right hook
+            Body.applyForce(lArmR, lArmR.position, { x: dir * 0.02, y: -0.008 });
+            Body.applyForce(uArmR, uArmR.position, { x: dir * 0.01, y: -0.003 });
+          }
+
+          // Lean into the fight slightly
+          Body.applyForce(torso, torso.position, { x: dir * 0.0004 * torso.mass, y: 0 });
+        }
+
+        // --- Headbutt when very close ---
+        if (nearDist < 55 && Math.random() < 0.03) {
+          Body.applyForce(head, head.position, { x: dir * 0.025, y: -0.012 });
+          Body.applyForce(torso, torso.position, { x: dir * 0.008, y: -0.003 });
+        }
+
+        // --- Arms at rest: keep them from dangling too low ---
+        if (nearDist >= 120) {
+          // Guard stance - arms roughly at sides
+          Body.applyForce(uArmL, uArmL.position, { x: 0, y: -grav * uArmL.mass * 0.4 });
+          Body.applyForce(uArmR, uArmR.position, { x: 0, y: -grav * uArmR.mass * 0.4 });
         }
       }
     }
