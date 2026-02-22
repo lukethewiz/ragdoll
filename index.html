@@ -1193,7 +1193,7 @@
             oldest.constraints.forEach(c => World.remove(world, c));
           }
         }
-        ragdolls.push(makeRagdoll(x, H - 180, currentSelection.key));
+        ragdolls.push(makeRagdoll(x, -60, currentSelection.key));
       } else {
         const body = PROP_TYPES[currentSelection.key].spawn(x, -40);
         World.add(world, body);
@@ -1229,101 +1229,6 @@
         }
       }
     }
-
-    // --- Fighter AI: all ragdolls stand, walk, and fight ---
-    Events.on(engine, 'beforeUpdate', () => {
-      for (const rd of ragdolls) {
-        const { head, torso, hips, uArmL, lArmL, uArmR, lArmR, uLegL, lLegL, uLegR, lLegR } = rd.body;
-        const grav = engine.gravity.y;
-
-        // --- Strong upright balance ---
-        Body.setAngularVelocity(torso, torso.angularVelocity * 0.75 - torso.angle * 0.15);
-        Body.setAngularVelocity(hips, hips.angularVelocity * 0.75 - hips.angle * 0.12);
-
-        // Anti-gravity on upper body
-        Body.applyForce(head, head.position, { x: 0, y: -grav * head.mass * 0.9 });
-        Body.applyForce(torso, torso.position, { x: 0, y: -grav * torso.mass * 0.8 });
-        Body.applyForce(hips, hips.position, { x: 0, y: -grav * hips.mass * 0.6 });
-
-        // Keep head above torso
-        if (head.position.y > torso.position.y - 5) {
-          Body.applyForce(head, head.position, { x: 0, y: -0.004 * head.mass });
-        }
-
-        // Keep hips under torso
-        const hipDriftX = hips.position.x - torso.position.x;
-        Body.applyForce(hips, hips.position, { x: -hipDriftX * 0.003, y: 0 });
-
-        // --- Leg planting ---
-        const hipX = hips.position.x;
-        const sp = 12;
-        Body.setAngularVelocity(uLegL, uLegL.angularVelocity * 0.8);
-        Body.setAngularVelocity(uLegR, uLegR.angularVelocity * 0.8);
-        Body.setAngularVelocity(lLegL, lLegL.angularVelocity * 0.8);
-        Body.setAngularVelocity(lLegR, lLegR.angularVelocity * 0.8);
-        Body.applyForce(uLegL, uLegL.position, { x: (hipX - sp - uLegL.position.x) * 0.0015, y: 0.001 });
-        Body.applyForce(uLegR, uLegR.position, { x: (hipX + sp - uLegR.position.x) * 0.0015, y: 0.001 });
-        Body.applyForce(lLegL, lLegL.position, { x: (hipX - sp - lLegL.position.x) * 0.001, y: 0.0015 });
-        Body.applyForce(lLegR, lLegR.position, { x: (hipX + sp - lLegR.position.x) * 0.001, y: 0.0015 });
-
-        // --- Recovery if knocked down ---
-        if (Math.abs(torso.angle) > 1.0) {
-          Body.applyForce(torso, torso.position, { x: 0, y: -0.01 * torso.mass });
-          Body.applyForce(hips, hips.position, { x: 0, y: -0.006 * hips.mass });
-        }
-
-        // --- Find nearest other ragdoll ---
-        let nearest = null, nearDist = Infinity;
-        for (const other of ragdolls) {
-          if (other === rd) continue;
-          const dist = Math.abs(other.body.torso.position.x - torso.position.x);
-          if (dist < nearDist) { nearDist = dist; nearest = other; }
-        }
-        if (!nearest) continue;
-
-        const dx = nearest.body.torso.position.x - torso.position.x;
-        const dir = Math.sign(dx);
-
-        // --- Walk toward enemy ---
-        Body.applyForce(hips, hips.position, { x: dir * 0.0008 * hips.mass, y: 0 });
-        Body.applyForce(torso, torso.position, { x: dir * 0.0004 * torso.mass, y: 0 });
-
-        rd.walkTimer = (rd.walkTimer || 0) + 1;
-        if (rd.walkTimer % 28 < 14) {
-          Body.applyForce(uLegL, uLegL.position, { x: dir * 0.003, y: -0.003 });
-          Body.applyForce(lLegL, lLegL.position, { x: dir * 0.0015, y: -0.0015 });
-        } else {
-          Body.applyForce(uLegR, uLegR.position, { x: dir * 0.003, y: -0.003 });
-          Body.applyForce(lLegR, lLegR.position, { x: dir * 0.0015, y: -0.0015 });
-        }
-
-        // --- Punch when close ---
-        if (nearDist < 120) {
-          rd.punchTimer = (rd.punchTimer || Math.random() * 40 | 0) + 1;
-          const phase = rd.punchTimer % 36;
-          if (phase < 7) {
-            Body.applyForce(lArmL, lArmL.position, { x: dir * 0.025, y: -0.01 });
-            Body.applyForce(uArmL, uArmL.position, { x: dir * 0.012, y: -0.004 });
-          } else if (phase > 18 && phase < 25) {
-            Body.applyForce(lArmR, lArmR.position, { x: dir * 0.025, y: -0.01 });
-            Body.applyForce(uArmR, uArmR.position, { x: dir * 0.012, y: -0.004 });
-          }
-          Body.applyForce(torso, torso.position, { x: dir * 0.0005 * torso.mass, y: 0 });
-        }
-
-        // --- Headbutt when very close ---
-        if (nearDist < 50 && Math.random() < 0.04) {
-          Body.applyForce(head, head.position, { x: dir * 0.03, y: -0.015 });
-          Body.applyForce(torso, torso.position, { x: dir * 0.01, y: -0.004 });
-        }
-
-        // --- Guard stance arms when not punching ---
-        if (nearDist >= 120) {
-          Body.applyForce(uArmL, uArmL.position, { x: 0, y: -grav * uArmL.mass * 0.5 });
-          Body.applyForce(uArmR, uArmR.position, { x: 0, y: -grav * uArmR.mass * 0.5 });
-        }
-      }
-    });
 
     // --- Collision → blood + sound ---
     Events.on(engine, 'collisionStart', (event) => {
