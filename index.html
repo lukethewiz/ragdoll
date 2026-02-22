@@ -683,6 +683,38 @@
           // Furniture — bookshelf (second floor, right of interior wall)
           World.add(world, st(W * 0.56, f2y - 18, 20, 28, '#3a2418'));
         }
+      },
+
+      arena: {
+        label: 'Arena',
+        emoji: '🥊',
+        desc: 'Fight club',
+        background: '#0a0a14',
+        build(world, W, H) {
+          const st = (x, y, w, h, c, extra = {}) => Bodies.rectangle(x, y, w, h, {
+            isStatic: true, render: { fillStyle: c }, friction: 0.8, restitution: 0.05, ...extra
+          });
+          const floor = '#2a1520';
+          const wall  = '#3d1428';
+          const accent = '#5c1a30';
+
+          // Arena floor
+          World.add(world, st(W / 2, H - 15, W * 0.85, 30, floor));
+
+          // Floor edge markings
+          World.add(world, st(W / 2, H - 31, W * 0.85, 4, accent));
+
+          // Side walls (angled slightly inward)
+          World.add(world, st(W * 0.08, H * 0.55, 40, H * 0.9, wall));
+          World.add(world, st(W * 0.92, H * 0.55, 40, H * 0.9, wall));
+
+          // Center platform (small obstacle)
+          World.add(world, st(W / 2, H - 55, 80, 12, accent));
+
+          // Corner ramps
+          World.add(world, st(W * 0.2, H - 38, 100, 10, floor, { angle: -0.15 }));
+          World.add(world, st(W * 0.8, H - 38, 100, 10, floor, { angle: 0.15 }));
+        }
       }
     };
 
@@ -1175,7 +1207,10 @@
         }
       });
 
-      return { parts, constraints, isZombie };
+      return {
+        parts, constraints, isZombie,
+        body: { head, torso, hips, uArmL, lArmL, uArmR, lArmR, uLegL, lLegL, uLegR, lLegR }
+      };
     }
 
     let ragdolls = [];
@@ -1190,7 +1225,9 @@
             oldest.constraints.forEach(c => World.remove(world, c));
           }
         }
-        ragdolls.push(makeRagdoll(x, -60, currentSelection.key));
+        const rd = makeRagdoll(x, -60, currentSelection.key);
+        if (selectedMap === 'arena') rd.isFighter = true;
+        ragdolls.push(rd);
       } else {
         const body = PROP_TYPES[currentSelection.key].spawn(x, -40);
         World.add(world, body);
@@ -1228,6 +1265,77 @@
     }
 
     // --- Collision → blood + sound ---
+    // --- Fighter AI system ---
+    function updateFighters() {
+      for (const rd of ragdolls) {
+        if (!rd.isFighter) continue;
+        const { head, torso, hips, uArmL, lArmL, uArmR, lArmR, uLegL, lLegL, uLegR, lLegR } = rd.body;
+
+        // --- Balance: keep torso upright ---
+        const angleErr = torso.angle;
+        Body.applyForce(torso, torso.position, { x: -angleErr * 0.003 * torso.mass, y: 0 });
+        Body.setAngularVelocity(torso, torso.angularVelocity * 0.92);
+
+        // Anti-gravity assist on torso+hips (partial — keeps them standing)
+        const grav = engine.gravity.y;
+        Body.applyForce(torso, torso.position, { x: 0, y: -grav * torso.mass * 0.35 });
+        Body.applyForce(hips, hips.position, { x: 0, y: -grav * hips.mass * 0.2 });
+
+        // --- Leg stance: keep feet under body ---
+        const hipX = hips.position.x;
+        const spread = 14;
+        const legK = 0.0004;
+        Body.applyForce(lLegL, lLegL.position, { x: (hipX - spread - lLegL.position.x) * legK, y: 0 });
+        Body.applyForce(lLegR, lLegR.position, { x: (hipX + spread - lLegR.position.x) * legK, y: 0 });
+        // Push lower legs down (stance)
+        Body.applyForce(lLegL, lLegL.position, { x: 0, y: 0.0005 });
+        Body.applyForce(lLegR, lLegR.position, { x: 0, y: 0.0005 });
+
+        // --- Find nearest enemy ---
+        let nearest = null, nearDist = Infinity;
+        for (const other of ragdolls) {
+          if (other === rd) continue;
+          const dist = Math.abs(other.body.torso.position.x - torso.position.x);
+          if (dist < nearDist) { nearDist = dist; nearest = other; }
+        }
+
+        if (!nearest) continue;
+        const dx = nearest.body.torso.position.x - torso.position.x;
+        const dir = Math.sign(dx);
+
+        // --- Walk toward enemy ---
+        Body.applyForce(hips, hips.position, { x: dir * 0.0004 * hips.mass, y: 0 });
+
+        // Alternate leg stepping (simple walk cycle)
+        rd.walkTimer = (rd.walkTimer || 0) + 1;
+        const stepping = rd.walkTimer % 40 < 20;
+        const stepLeg = stepping ? uLegL : uLegR;
+        Body.applyForce(stepLeg, stepLeg.position, { x: dir * 0.0008, y: -0.001 });
+
+        // --- Punch when close ---
+        if (nearDist < 100) {
+          rd.punchTimer = (rd.punchTimer || Math.random() * 60 | 0) + 1;
+          const phase = rd.punchTimer % 50;
+          if (phase < 6) {
+            // Left hook
+            Body.applyForce(lArmL, lArmL.position, { x: dir * 0.012, y: -0.005 });
+            Body.applyForce(uArmL, uArmL.position, { x: dir * 0.006, y: -0.002 });
+          } else if (phase > 25 && phase < 31) {
+            // Right hook
+            Body.applyForce(lArmR, lArmR.position, { x: dir * 0.012, y: -0.005 });
+            Body.applyForce(uArmR, uArmR.position, { x: dir * 0.006, y: -0.002 });
+          }
+        }
+
+        // --- Occasional headbutt when very close ---
+        if (nearDist < 50 && Math.random() < 0.02) {
+          Body.applyForce(head, head.position, { x: dir * 0.015, y: -0.008 });
+        }
+      }
+    }
+
+    Events.on(engine, 'beforeUpdate', updateFighters);
+
     Events.on(engine, 'collisionStart', (event) => {
       for (const pair of event.pairs) {
         const { bodyA, bodyB, collision } = pair;
