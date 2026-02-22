@@ -318,6 +318,7 @@
   <!-- In-game gear button -->
   <div id="hud-btns" style="display:none">
     <button id="btn-ingame-settings">⚙</button>
+    <button id="btn-quit" style="background:rgba(22,33,62,0.85);color:#777;border:2px solid #0f3460;width:36px;height:36px;border-radius:50%;font-size:16px;cursor:pointer;margin-top:6px;">✕</button>
   </div>
 
   <canvas id="blood-canvas"></canvas>
@@ -1285,6 +1286,10 @@
       document.getElementById('controls').style.display = '';
       document.getElementById('hud-btns').style.display = '';
       spawnCurrent();
+    });
+
+    document.getElementById('btn-quit').addEventListener('click', () => {
+      location.reload();
     });
 
     document.getElementById('btn-leave').addEventListener('click', () => {
