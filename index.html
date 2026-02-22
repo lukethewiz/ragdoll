@@ -544,6 +544,66 @@
       noise.start(t);
     }
 
+    function playScream(speed) {
+      if (!soundEnabled) return;
+      const ctx = getAudio();
+      const t = ctx.currentTime;
+      const vol = Math.min(0.5, speed / 30);
+      // Randomize pitch for variety — each ragdoll sounds different
+      const basePitch = 300 + Math.random() * 400; // 300-700 Hz range
+
+      // Main voice — sawtooth for harsh vocal tone
+      const voice = ctx.createOscillator();
+      const voiceGain = ctx.createGain();
+      voice.type = 'sawtooth';
+      voice.frequency.setValueAtTime(basePitch * 1.2, t);
+      voice.frequency.exponentialRampToValueAtTime(basePitch * 0.7, t + 0.25);
+      voice.frequency.exponentialRampToValueAtTime(basePitch * 0.4, t + 0.4);
+      voiceGain.gain.setValueAtTime(vol * 0.35, t);
+      voiceGain.gain.linearRampToValueAtTime(vol * 0.5, t + 0.05);
+      voiceGain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+
+      // Formant filter — makes it sound voice-like
+      const formant = ctx.createBiquadFilter();
+      formant.type = 'bandpass';
+      formant.frequency.setValueAtTime(basePitch * 2.5, t);
+      formant.frequency.exponentialRampToValueAtTime(basePitch * 1.2, t + 0.3);
+      formant.Q.value = 3;
+
+      voice.connect(formant);
+      formant.connect(voiceGain);
+      voiceGain.connect(ctx.destination);
+      voice.start(t); voice.stop(t + 0.4);
+
+      // Second harmonic — adds body
+      const h2 = ctx.createOscillator();
+      const h2Gain = ctx.createGain();
+      h2.type = 'triangle';
+      h2.frequency.setValueAtTime(basePitch * 0.5, t);
+      h2.frequency.exponentialRampToValueAtTime(basePitch * 0.3, t + 0.35);
+      h2Gain.gain.setValueAtTime(vol * 0.2, t);
+      h2Gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      h2.connect(h2Gain); h2Gain.connect(ctx.destination);
+      h2.start(t); h2.stop(t + 0.35);
+
+      // Breathy noise layer
+      const bufLen = ctx.sampleRate * 0.3;
+      const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      const nFilter = ctx.createBiquadFilter();
+      nFilter.type = 'bandpass';
+      nFilter.frequency.value = basePitch * 2;
+      nFilter.Q.value = 2;
+      const nGain = ctx.createGain();
+      nGain.gain.setValueAtTime(vol * 0.15, t);
+      nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      noise.connect(nFilter); nFilter.connect(nGain); nGain.connect(ctx.destination);
+      noise.start(t);
+    }
+
     // --- Map definitions ---
     const MAPS = {
       default: {
@@ -1253,6 +1313,7 @@
           for (const rd of ragdolls) {
             if (rd.parts.includes(ragdoll)) {
               rd.body.head.screamTimer = 30 + Math.min(speed * 2, 40);
+              playScream(speed);
               break;
             }
           }
