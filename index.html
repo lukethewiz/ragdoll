@@ -753,6 +753,27 @@
         isZombie: true,
         colors: { head: '#6b8e5a', torso: '#4a6b3a', hips: '#3d5c2e', arm: '#7a9968', legU: '#3a5c2a', legL: '#2d4a20' }
       },
+      stickman: {
+        label: '🏃 Stickman',
+        scale: 0.95,
+        limbScale: { armW: 0.3, legW: 0.3, torsoW: 0.3, hipsW: 0.3, headR: 0.75 },
+        density: 0.0004,
+        friction: 0.25,
+        restitution: 0.45,
+        jointStiff: 0.85,
+        stroke: { color: '#000', width: 2 },
+        colors: { head: '#111', torso: '#111', hips: '#111', arm: '#111', legU: '#111', legL: '#111' }
+      },
+      dummy: {
+        label: '🎯 Dummy',
+        scale: 1,
+        density: 0.0012,
+        friction: 0.5,
+        restitution: 0.3,
+        jointStiff: 1.0,
+        stroke: { color: '#000', width: 2 },
+        colors: { head: '#ffd700', torso: '#ffd700', hips: '#333', arm: '#ffd700', legU: '#333', legL: '#ffd700' }
+      },
     };
 
     // --- Prop types ---
@@ -1065,18 +1086,28 @@
       const legLen = (ls.legLen || 1.0);
       const armW   = (ls.armW   || 1.0);
       const legW   = (ls.legW   || 1.0);
+      const torsoWS = (ls.torsoW || 1.0);
+      const hipsWS  = (ls.hipsW  || 1.0);
+      const headRS  = (ls.headR  || 1.0);
       const c = cfg.colors;
 
-      const phys = (color, densityMult = 1) => ({
-        friction: cfg.friction,
-        restitution: cfg.restitution,
-        density: cfg.density * densityMult,
-        render: { fillStyle: color }
-      });
+      const phys = (color, densityMult = 1) => {
+        const opts = {
+          friction: cfg.friction,
+          restitution: cfg.restitution,
+          density: cfg.density * densityMult,
+          render: { fillStyle: color }
+        };
+        if (cfg.stroke) {
+          opts.render.strokeStyle = cfg.stroke.color;
+          opts.render.lineWidth = cfg.stroke.width;
+        }
+        return opts;
+      };
 
-      const headR = 13 * s;
-      const torsoW = 22 * s, torsoH = 38 * s;
-      const hipsW = 20 * s, hipsH = 14 * s;
+      const headR = 13 * s * headRS;
+      const torsoW = 22 * s * torsoWS, torsoH = 38 * s;
+      const hipsW = 20 * s * hipsWS, hipsH = 14 * s;
       const uArmW = 10 * s * armW, uArmH = 26 * s * armLen;
       const lArmW = 9  * s * armW, lArmH = 24 * s * armLen;
       const uLegW = 12 * s * legW, uLegH = 28 * s * legLen;
