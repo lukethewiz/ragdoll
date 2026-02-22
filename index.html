@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ragdoll Fall</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; overflow: hidden; font-family: sans-serif; }
+    #ui { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); color: #eee; font-size: 15px; text-align: center; pointer-events: none; z-index: 10; white-space: nowrap; }
+    #controls {
+      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 10;
+    }
+    .btn-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+    .row-label { color: #888; font-size: 11px; text-align: center; letter-spacing: 1px; text-transform: uppercase; }
+    .type-btn {
+      background: #16213e; color: #eee; border: 2px solid #0f3460;
+      padding: 8px 12px; border-radius: 20px; font-size: 13px; cursor: pointer;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .type-btn.active { background: #e94560; border-color: #e94560; color: white; }
+    .type-btn.prop-btn.active { background: #2a9d8f; border-color: #2a9d8f; color: white; }
+    .type-btn:active { opacity: 0.8; }
+    canvas { display: block; touch-action: none; }
+    #blood-canvas { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 5; }
+
+    /* --- Main menu --- */
+    #menu {
+      position: fixed; inset: 0; z-index: 100;
+      background: #0d0d1a;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 24px;
+      transition: opacity 0.5s ease;
+    }
+    #menu.hidden { opacity: 0; pointer-events: none; }
+    #menu-title {
+      font-size: clamp(48px, 12vw, 96px);
+      font-weight: 900;
+      letter-spacing: 6px;
+      color: #e94560;
+      text-shadow: 0 0 40px #e9456088, 0 4px 0 #7a0018;
+      text-transform: uppercase;
+      user-select: none;
+    }
+    #menu-sub {
+      font-size: clamp(13px, 3vw, 18px);
+      color: #666;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-top: -12px;
+    }
+    .menu-btn {
+      width: min(320px, 80vw);
+      padding: 16px 0;
+      border-radius: 40px;
+      border: none;
+      font-size: clamp(16px, 4vw, 22px);
+      font-weight: 700;
+      letter-spacing: 2px;
+      cursor: pointer;
+      text-transform: uppercase;
+      touch-action: manipulation;
+      transition: transform 0.1s, filter 0.1s;
+    }
+    .menu-btn:active { transform: scale(0.96); }
+    #btn-begin {
+      background: #e94560;
+      color: white;
+      box-shadow: 0 0 30px #e9456066;
+    }
+    #btn-begin:hover { filter: brightness(1.15); }
+    #btn-maps {
+      background: #16213e;
+      color: #aaa;
+      border: 2px solid #0f3460;
+    }
+    #btn-maps:hover { color: #eee; border-color: #2a5a8a; }
+    #menu-map-label {
+      font-size: 12px; color: #444; letter-spacing: 2px;
+      text-transform: uppercase; margin-top: -10px;
+    }
+    #btn-leave {
+      background: transparent;
+      color: #555;
+      border: 2px solid #333;
+    }
+    #btn-leave:hover { color: #888; border-color: #555; }
+
+    /* --- Map selection overlay --- */
+    #map-select {
+      position: fixed; inset: 0; z-index: 110;
+      background: #0d0d1a;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 28px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    #map-select.visible { opacity: 1; pointer-events: all; }
+    #map-select-title {
+      font-size: clamp(22px, 5vw, 42px);
+      font-weight: 900; letter-spacing: 4px; color: #ccc;
+      text-transform: uppercase;
+    }
+    #map-cards {
+      display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+      padding: 0 16px;
+    }
+    .map-card {
+      width: min(160px, 42vw);
+      background: #16213e; border: 2px solid #0f3460;
+      border-radius: 14px; padding: 20px 12px 16px;
+      cursor: pointer; text-align: center;
+      transition: border-color 0.15s, background 0.15s, transform 0.1s;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .map-card:hover { border-color: #3a6090; }
+    .map-card:active { transform: scale(0.96); }
+    .map-card.selected { border-color: #e94560; background: #1e0f1e; }
+    .map-card-emoji { font-size: 36px; display: block; margin-bottom: 10px; }
+    .map-card-label { color: #eee; font-weight: 700; font-size: 15px; letter-spacing: 1px; display: block; }
+    .map-card-desc { color: #555; font-size: 11px; margin-top: 4px; display: block; letter-spacing: 0.5px; }
+    #btn-map-back {
+      position: absolute; top: 20px; left: 20px;
+      background: transparent; border: 2px solid #333;
+      color: #555; font-size: 13px; cursor: pointer;
+      letter-spacing: 1px; padding: 8px 18px;
+      border-radius: 20px; font-weight: 700; text-transform: uppercase;
+      transition: color 0.15s, border-color 0.15s;
+      touch-action: manipulation;
+    }
+    #btn-map-back:hover { color: #eee; border-color: #555; }
+
+    /* --- Settings panel --- */
+    #settings-panel {
+      position: fixed; inset: 0; z-index: 120;
+      background: #0d0d1a;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 28px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    #settings-panel.visible { opacity: 1; pointer-events: all; }
+    #settings-title {
+      font-size: clamp(22px, 5vw, 42px);
+      font-weight: 900; letter-spacing: 4px; color: #ccc;
+      text-transform: uppercase;
+    }
+    #settings-rows {
+      display: flex; flex-direction: column; gap: 12px;
+      width: min(380px, 90vw);
+    }
+    .setting-row {
+      display: flex; justify-content: space-between; align-items: center;
+      background: #16213e; border: 1px solid #0f3460;
+      border-radius: 12px; padding: 14px 18px;
+    }
+    .setting-label { color: #ccc; font-size: 15px; font-weight: 600; letter-spacing: 1px; }
+
+    /* Toggle switch */
+    .toggle-switch { position: relative; width: 50px; height: 28px; display: inline-block; cursor: pointer; }
+    .toggle-switch input { display: none; }
+    .toggle-slider {
+      position: absolute; inset: 0; background: #2a2a4a; border-radius: 28px;
+      transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute;
+      width: 22px; height: 22px; left: 3px; top: 3px;
+      background: #555; border-radius: 50%; transition: transform 0.2s, background 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-slider { background: #1a3a2e; }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(22px); background: #2a9d8f; }
+
+    /* Gravity slider */
+    .setting-control-col { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .range-labels {
+      display: flex; justify-content: space-between; width: 160px;
+      color: #444; font-size: 11px; letter-spacing: 0.5px;
+    }
+    #gravity-val { color: #aaa; font-weight: 700; }
+    input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 160px; height: 6px;
+      background: #0f3460; border-radius: 3px; outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 18px; height: 18px;
+      background: #e94560; border-radius: 50%; cursor: pointer;
+      box-shadow: 0 0 6px #e9456066;
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 18px; height: 18px; background: #e94560;
+      border-radius: 50%; cursor: pointer; border: none;
+    }
+
+    /* Ragdoll cap buttons */
+    .cap-btns { display: flex; gap: 6px; }
+    .cap-btn {
+      background: #0f3460; color: #aaa; border: 1px solid #1a4a80;
+      padding: 6px 12px; border-radius: 8px; font-size: 14px; font-weight: 700;
+      cursor: pointer; transition: background 0.15s, color 0.15s; touch-action: manipulation;
+    }
+    .cap-btn.active { background: #e94560; color: white; border-color: #e94560; }
+
+    /* Clear All button */
+    #btn-clear-all {
+      background: transparent; border: 2px solid #e94560; color: #e94560;
+      padding: 10px 32px; border-radius: 8px; font-size: 14px; font-weight: 700;
+      cursor: pointer; letter-spacing: 1px; text-transform: uppercase;
+      transition: background 0.15s, color 0.15s; touch-action: manipulation;
+    }
+    #btn-clear-all:hover { background: #e94560; color: white; }
+    #btn-clear-all:active { opacity: 0.8; }
+
+    /* Settings back button */
+    #btn-settings-back {
+      position: absolute; top: 20px; left: 20px;
+      background: transparent; border: 2px solid #333;
+      color: #555; font-size: 13px; cursor: pointer;
+      letter-spacing: 1px; padding: 8px 18px;
+      border-radius: 20px; font-weight: 700; text-transform: uppercase;
+      transition: color 0.15s, border-color 0.15s; touch-action: manipulation;
+    }
+    #btn-settings-back:hover { color: #eee; border-color: #555; }
+
+    /* In-game gear button */
+    #hud-btns { position: fixed; top: 12px; right: 12px; z-index: 10; }
+    #btn-ingame-settings {
+      background: rgba(22,33,62,0.85); color: #777;
+      border: 2px solid #0f3460; width: 36px; height: 36px;
+      border-radius: 50%; font-size: 16px; cursor: pointer;
+      touch-action: manipulation; transition: color 0.15s, border-color 0.15s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #btn-ingame-settings:hover { color: #eee; border-color: #3a6090; }
+  </style>
+</head>
+<body>
+  <!-- Main menu -->
+  <div id="menu">
+    <div id="menu-title">Ragdoll</div>
+    <div id="menu-sub">Physics Sandbox</div>
+    <button class="menu-btn" id="btn-begin">Begin Crime</button>
+    <button class="menu-btn" id="btn-maps">Maps</button>
+    <div id="menu-map-label">Map: <span id="menu-map-name">Void</span></div>
+    <button class="menu-btn" id="btn-settings">Settings</button>
+    <button class="menu-btn" id="btn-leave">Leave</button>
+  </div>
+
+  <!-- Settings panel -->
+  <div id="settings-panel">
+    <button id="btn-settings-back">← Back</button>
+    <div id="settings-title">Settings</div>
+    <div id="settings-rows">
+
+      <div class="setting-row">
+        <span class="setting-label">Sound</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="set-sound" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Blood</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="set-blood" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Gravity</span>
+        <div class="setting-control-col">
+          <input type="range" id="set-gravity" min="0.2" max="3" step="0.1" value="1.5">
+          <div class="range-labels">
+            <span>Light</span><span id="gravity-val">1.5×</span><span>Heavy</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <span class="setting-label">Ragdoll Cap</span>
+        <div class="cap-btns">
+          <button class="cap-btn" data-val="5">5</button>
+          <button class="cap-btn" data-val="10">10</button>
+          <button class="cap-btn" data-val="20">20</button>
+          <button class="cap-btn active" data-val="Infinity">∞</button>
+        </div>
+      </div>
+
+      <div class="setting-row" style="justify-content:center;">
+        <button id="btn-clear-all">Clear All</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Map selection overlay -->
+  <div id="map-select">
+    <button id="btn-map-back">← Back</button>
+    <div id="map-select-title">Select Map</div>
+    <div id="map-cards"></div>
+  </div>
+
+  <!-- In-game gear button -->
+  <div id="hud-btns" style="display:none">
+    <button id="btn-ingame-settings">⚙</button>
+  </div>
+
+  <canvas id="blood-canvas"></canvas>
+  <div id="ui" style="display:none">Tap to spawn &bull; Drag to fling</div>
+  <div id="controls" style="display:none">
+    <div class="row-label">Ragdolls</div>
+    <div class="btn-row" id="ragdoll-row"></div>
+    <div class="row-label">Props</div>
+    <div class="btn-row" id="props-row"></div>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script>
+    const { Engine, Render, Runner, Bodies, Body, Composite, Constraint, Events, Mouse, MouseConstraint, World } = Matter;
+
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+
+    // --- Settings state ---
+    let soundEnabled = true;
+    let bloodEnabled = true;
+    let ragdollLimit = Infinity;
+    let spawnedProps = [];
+
+    // --- Blood system ---
+    const bloodCanvas = document.getElementById('blood-canvas');
+    bloodCanvas.width = W;
+    bloodCanvas.height = H;
+    const bctx = bloodCanvas.getContext('2d');
+
+    const bloodParticles = [];
+
+    function spawnBlood(x, y, speed) {
+      if (!bloodEnabled) return;
+      const count = Math.floor(4 + speed * 1.5);
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const v = (Math.random() * 0.5 + 0.5) * speed * 0.6;
+        bloodParticles.push({
+          x, y,
+          vx: Math.cos(angle) * v,
+          vy: Math.sin(angle) * v - Math.random() * 2,
+          r: Math.random() * 4 + 1.5,
+          life: 1,
+          decay: 0.02 + Math.random() * 0.03,
+          stuck: false,
+          color: `hsl(${355 + Math.random() * 10}, 90%, ${20 + Math.random() * 20}%)`
+        });
+      }
+    }
+
+    function updateBlood() {
+      for (let i = bloodParticles.length - 1; i >= 0; i--) {
+        const p = bloodParticles[i];
+        if (p.stuck) {
+          p.life -= 0.0008;
+          if (p.life <= 0) bloodParticles.splice(i, 1);
+          continue;
+        }
+        p.vy += 0.18;
+        p.vx *= 0.97;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= p.decay;
+        if (Math.abs(p.vy) < 0.5 && Math.abs(p.vx) < 0.5 || p.y >= H - 1) {
+          p.stuck = true;
+          p.life = 0.7 + Math.random() * 0.3;
+          p.r *= 1.8 + Math.random();
+        }
+        if (p.life <= 0) bloodParticles.splice(i, 1);
+      }
+    }
+
+    function drawBlood() {
+      bctx.clearRect(0, 0, W, H);
+      for (const p of bloodParticles) {
+        bctx.globalAlpha = Math.max(0, p.life) * (p.stuck ? 0.85 : 0.9);
+        bctx.fillStyle = p.color;
+        bctx.beginPath();
+        bctx.ellipse(p.x, p.y, p.r, p.stuck ? p.r * 0.45 : p.r, 0, 0, Math.PI * 2);
+        bctx.fill();
+      }
+      bctx.globalAlpha = 1;
+    }
+
+    // --- Sound system ---
+    let audioCtx = null;
+    function getAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+
+    function playThud(speed) {
+      if (!soundEnabled) return;
+      const ctx = getAudio();
+      const t = ctx.currentTime;
+      const vol = Math.min(1, speed / 20);
+      const freq = Math.max(40, 120 - speed * 2);
+      const osc = ctx.createOscillator();
+      const oscGain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.3, t + 0.12);
+      oscGain.gain.setValueAtTime(vol * 0.6, t);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.connect(oscGain); oscGain.connect(ctx.destination);
+      osc.start(t); osc.stop(t + 0.18);
+      const bufLen = ctx.sampleRate * 0.12;
+      const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      const noiseFilter = ctx.createBiquadFilter();
+      noiseFilter.type = 'bandpass';
+      noiseFilter.frequency.value = 200 + speed * 8;
+      noiseFilter.Q.value = 0.8;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(vol * 0.4, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(ctx.destination);
+      noise.start(t);
+    }
+
+    function playSplat(speed) {
+      if (!soundEnabled) return;
+      const ctx = getAudio();
+      const t = ctx.currentTime;
+      const vol = Math.min(1, (speed - 10) / 15);
+      const bufLen = ctx.sampleRate * 0.25;
+      const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass'; filter.frequency.value = 400;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(vol * 0.5, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+      noise.start(t);
+    }
+
+    function playWhoosh() {
+      if (!soundEnabled) return;
+      const ctx = getAudio();
+      const t = ctx.currentTime;
+      const bufLen = ctx.sampleRate * 0.3;
+      const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(800, t);
+      filter.frequency.exponentialRampToValueAtTime(200, t + 0.3);
+      filter.Q.value = 1.5;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(0.25, t + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+      noise.start(t);
+    }
+
+    // --- Map definitions ---
+    const MAPS = {
+      default: {
+        label: 'Void',
+        emoji: '🌌',
+        desc: 'Floating platforms',
+        background: '#1a1a2e',
+        build(world, W, H) {
+          const st = (x, y, w, h, c) => Bodies.rectangle(x, y, w, h, {
+            isStatic: true, render: { fillStyle: c }, friction: 0.6, restitution: 0.1
+          });
+          World.add(world, [
+            st(W / 2, H + 25, W * 3, 50, '#16213e'),
+            st(-25, H / 2, 50, H * 3, '#16213e'),
+            st(W + 25, H / 2, 50, H * 3, '#16213e'),
+          ]);
+          [
+            [W * 0.2, H * 0.3, 180, 18], [W * 0.6, H * 0.45, 200, 18],
+            [W * 0.35, H * 0.6, 160, 18], [W * 0.75, H * 0.72, 220, 18],
+            [W * 0.15, H * 0.82, 150, 18], [W * 0.5, H * 0.88, 250, 18],
+          ].forEach(([x, y, w, h]) => World.add(world, st(x, y, w, h, '#0f3460')));
+        }
+      },
+
+      office: {
+        label: 'Office',
+        emoji: '🏢',
+        desc: 'Open-plan office',
+        background: '#0d1821',
+        build(world, W, H) {
+          const st = (x, y, w, h, c, extra = {}) => Bodies.rectangle(x, y, w, h, {
+            isStatic: true, render: { fillStyle: c }, friction: 0.55, restitution: 0.05, ...extra
+          });
+          const floor  = '#1b3a52';
+          const dark   = '#0a1520';
+          const desk   = '#1a4a6a';
+          const cubWall = '#122a3e';
+
+          // Ground and outer walls
+          World.add(world, st(W / 2, H + 25, W * 3, 50, dark));
+          World.add(world, st(-25, H / 2, 50, H * 3, dark));
+          World.add(world, st(W + 25, H / 2, 50, H * 3, dark));
+
+          // Floor 2 (left 62% of screen) at y = H*0.62
+          const f2y = H * 0.62;
+          World.add(world, st(W * 0.31, f2y, W * 0.62, 18, floor));
+
+          // Floor 3 (right 60% of screen) at y = H*0.33
+          const f3y = H * 0.33;
+          World.add(world, st(W * 0.68, f3y, W * 0.60, 18, floor));
+
+          // Stair steps from floor 2 up to floor 3 (left side, going up-left)
+          const stepCount = 5;
+          const stepDY = (f2y - f3y) / (stepCount + 1);
+          for (let i = 0; i < stepCount; i++) {
+            const sx = W * 0.62 - i * W * 0.06;
+            const sy = f2y - (i + 1) * stepDY;
+            World.add(world, st(sx, sy, 52, 13, '#16334a'));
+          }
+
+          // Cubicle partitions on ground floor
+          World.add(world, st(W * 0.25, H - 44, 10, 88, cubWall));
+          World.add(world, st(W * 0.52, H - 44, 10, 88, cubWall));
+          World.add(world, st(W * 0.77, H - 44, 10, 88, cubWall));
+
+          // Desks on ground floor (in each cubicle bay)
+          World.add(world, st(W * 0.12, H - 15, 78, 12, desk));
+          World.add(world, st(W * 0.38, H - 15, 78, 12, desk));
+          World.add(world, st(W * 0.64, H - 15, 78, 12, desk));
+          World.add(world, st(W * 0.88, H - 15, 78, 12, desk));
+
+          // Desks on floor 2
+          World.add(world, st(W * 0.12, f2y - 13, 70, 10, desk));
+          World.add(world, st(W * 0.38, f2y - 13, 70, 10, desk));
+
+          // Desks on floor 3
+          World.add(world, st(W * 0.60, f3y - 13, 70, 10, desk));
+          World.add(world, st(W * 0.84, f3y - 13, 70, 10, desk));
+
+          // Filing cabinet on floor 3
+          World.add(world, st(W * 0.77, f3y - 18, 22, 28, '#132840'));
+        }
+      },
+
+      house: {
+        label: 'House',
+        emoji: '🏠',
+        desc: 'Two-story house',
+        background: '#140f0a',
+        build(world, W, H) {
+          const st = (x, y, w, h, c, extra = {}) => Bodies.rectangle(x, y, w, h, {
+            isStatic: true, render: { fillStyle: c }, friction: 0.7, restitution: 0.05, ...extra
+          });
+          const outerWall = '#3d2b1f';
+          const floorCol  = '#4a3728';
+          const furniture = '#5c4435';
+          const wallW     = 22;
+          const lx        = W * 0.07;
+          const rx        = W * 0.93;
+
+          // Ground
+          World.add(world, st(W / 2, H + 25, W * 3, 50, '#2a1e14'));
+
+          // Outer side walls
+          World.add(world, st(lx, H * 0.65, wallW, H * 0.72, outerWall));
+          World.add(world, st(rx, H * 0.65, wallW, H * 0.72, outerWall));
+
+          // Second floor — left portion (lx to W*0.62), gap right for stairs
+          const f2y = H * 0.48;
+          const fl2W = W * 0.62 - lx;
+          World.add(world, st(lx + fl2W / 2, f2y, fl2W, 18, floorCol));
+
+          // Stair steps descending from second floor (right side)
+          World.add(world, st(W * 0.67, H * 0.565, 68, 13, floorCol));
+          World.add(world, st(W * 0.725, H * 0.655, 68, 13, floorCol));
+          World.add(world, st(W * 0.775, H * 0.745, 68, 13, floorCol));
+          World.add(world, st(W * 0.825, H * 0.835, 68, 13, floorCol));
+
+          // Interior dividing wall (ground floor) with doorway gap
+          // Piece above doorway: from second floor (f2y) to y=H*0.68
+          const wallAboveH = H * 0.68 - f2y;
+          World.add(world, st(W * 0.5, f2y + wallAboveH / 2, wallW, wallAboveH, outerWall));
+          // Piece below doorway: from y=H*0.8 to ground
+          const wallBelowH = H - H * 0.8;
+          World.add(world, st(W * 0.5, H * 0.8 + wallBelowH / 2, wallW, wallBelowH, outerWall));
+
+          // Furniture — sofa (left room, ground floor)
+          World.add(world, st(W * 0.22, H - 11, 100, 20, furniture));  // seat
+          World.add(world, st(lx + wallW / 2 + 10, H - 28, wallW, 36, furniture)); // arm/back
+
+          // Furniture — table (right room, ground floor)
+          World.add(world, st(W * 0.73, H - 14, 90, 12, furniture));
+
+          // Furniture — bed (second floor, left room)
+          World.add(world, st(W * 0.25, f2y - 14, 110, 12, furniture));          // mattress
+          World.add(world, st(lx + wallW / 2 + 8, f2y - 22, wallW, 20, furniture)); // headboard
+
+          // Furniture — bookshelf (second floor, right of interior wall)
+          World.add(world, st(W * 0.56, f2y - 18, 20, 28, '#3a2418'));
+        }
+      }
+    };
+
+    // --- Ragdoll types ---
+    const RAGDOLL_TYPES = {
+      normal: {
+        label: '🧍 Normal',
+        scale: 1,
+        density: 0.001,
+        friction: 0.5,
+        restitution: 0.3,
+        jointStiff: 1.0,
+        colors: { head: '#f4a261', torso: '#e76f51', hips: '#e76f51', arm: '#f4a261', legU: '#457b9d', legL: '#1d3557' }
+      },
+      fat: {
+        label: '🐷 Fat',
+        scale: 1.7,
+        density: 0.003,
+        friction: 0.7,
+        restitution: 0.15,
+        jointStiff: 0.7,
+        colors: { head: '#ffb347', torso: '#ff8c00', hips: '#e07b00', arm: '#ffb347', legU: '#cc6600', legL: '#994c00' }
+      },
+      tiny: {
+        label: '🐭 Tiny',
+        scale: 0.45,
+        density: 0.0005,
+        friction: 0.3,
+        restitution: 0.7,
+        jointStiff: 1.2,
+        colors: { head: '#a8dadc', torso: '#457b9d', hips: '#457b9d', arm: '#a8dadc', legU: '#1d3557', legL: '#0d2137' }
+      },
+      lanky: {
+        label: '🦒 Lanky',
+        scale: 1,
+        limbScale: { armLen: 2.0, legLen: 2.2, armW: 0.7, legW: 0.7 },
+        density: 0.0006,
+        friction: 0.4,
+        restitution: 0.25,
+        jointStiff: 0.6,
+        colors: { head: '#b7e4c7', torso: '#52b788', hips: '#52b788', arm: '#b7e4c7', legU: '#2d6a4f', legL: '#1b4332' }
+      },
+      skeleton: {
+        label: '💀 Skeleton',
+        scale: 1,
+        density: 0.0004,
+        friction: 0.2,
+        restitution: 0.5,
+        jointStiff: 1.5,
+        colors: { head: '#f0f0f0', torso: '#d0d0d0', hips: '#d0d0d0', arm: '#e8e8e8', legU: '#c0c0c0', legL: '#a0a0a0' }
+      },
+      bouncy: {
+        label: '🏀 Bouncy',
+        scale: 1,
+        density: 0.0008,
+        friction: 0.05,
+        restitution: 0.95,
+        jointStiff: 0.4,
+        colors: { head: '#ff6b6b', torso: '#ffd93d', hips: '#ffd93d', arm: '#6bcb77', legU: '#4d96ff', legL: '#845ef7' }
+      },
+    };
+
+    // --- Prop types ---
+    const PROP_TYPES = {
+      crate: {
+        label: '📦 Crate',
+        spawn(x, y) {
+          const size = 36;
+          return Bodies.rectangle(x, y, size, size, {
+            density: 0.002, friction: 0.6, restitution: 0.2,
+            render: { fillStyle: '#c9a84c', strokeStyle: '#7a5c1e', lineWidth: 2 }
+          });
+        }
+      },
+      ball: {
+        label: '⚽ Ball',
+        spawn(x, y) {
+          return Bodies.circle(x, y, 22, {
+            density: 0.001, friction: 0.05, restitution: 0.85,
+            render: { fillStyle: '#f5f5f5', strokeStyle: '#333', lineWidth: 2 }
+          });
+        }
+      },
+      barrel: {
+        label: '🛢️ Barrel',
+        spawn(x, y) {
+          return Bodies.circle(x, y, 32, {
+            density: 0.004, friction: 0.5, restitution: 0.15,
+            render: { fillStyle: '#8b4513', strokeStyle: '#5c2a00', lineWidth: 3 }
+          });
+        }
+      },
+      plank: {
+        label: '🪵 Plank',
+        spawn(x, y) {
+          return Bodies.rectangle(x, y, 160, 14, {
+            density: 0.001, friction: 0.6, restitution: 0.1,
+            angle: (Math.random() - 0.5) * 0.4,
+            render: { fillStyle: '#a0522d', strokeStyle: '#6b3210', lineWidth: 2 }
+          });
+        }
+      },
+      boulder: {
+        label: '🪨 Boulder',
+        spawn(x, y) {
+          return Bodies.circle(x, y, 44, {
+            density: 0.008, friction: 0.8, restitution: 0.05,
+            render: { fillStyle: '#888', strokeStyle: '#555', lineWidth: 2 }
+          });
+        }
+      },
+    };
+
+    // Unified selection: ragdoll type OR prop type
+    let currentSelection = { kind: 'ragdoll', key: 'normal' };
+
+    function setAllInactive() {
+      document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+    }
+
+    // Build ragdoll buttons
+    const ragdollRow = document.getElementById('ragdoll-row');
+    Object.entries(RAGDOLL_TYPES).forEach(([key, cfg]) => {
+      const btn = document.createElement('button');
+      btn.className = 'type-btn' + (key === 'normal' ? ' active' : '');
+      btn.textContent = cfg.label;
+      btn.addEventListener('click', () => {
+        setAllInactive();
+        btn.classList.add('active');
+        currentSelection = { kind: 'ragdoll', key };
+      });
+      ragdollRow.appendChild(btn);
+    });
+
+    // Build prop buttons
+    const propsRow = document.getElementById('props-row');
+    Object.entries(PROP_TYPES).forEach(([key, cfg]) => {
+      const btn = document.createElement('button');
+      btn.className = 'type-btn prop-btn';
+      btn.textContent = cfg.label;
+      btn.addEventListener('click', () => {
+        setAllInactive();
+        btn.classList.add('active');
+        currentSelection = { kind: 'prop', key };
+      });
+      propsRow.appendChild(btn);
+    });
+
+    // --- Map selection UI ---
+    let selectedMap = 'default';
+
+    const mapCardsEl = document.getElementById('map-cards');
+    Object.entries(MAPS).forEach(([key, cfg]) => {
+      const card = document.createElement('div');
+      card.className = 'map-card' + (key === 'default' ? ' selected' : '');
+      card.innerHTML = `
+        <span class="map-card-emoji">${cfg.emoji}</span>
+        <span class="map-card-label">${cfg.label}</span>
+        <span class="map-card-desc">${cfg.desc}</span>
+      `;
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.map-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        selectedMap = key;
+        document.getElementById('menu-map-name').textContent = cfg.label;
+      });
+      mapCardsEl.appendChild(card);
+    });
+
+    document.getElementById('btn-maps').addEventListener('click', () => {
+      document.getElementById('map-select').classList.add('visible');
+    });
+
+    document.getElementById('btn-map-back').addEventListener('click', () => {
+      document.getElementById('map-select').classList.remove('visible');
+    });
+
+    // --- Settings panel ---
+    function openSettings() { document.getElementById('settings-panel').classList.add('visible'); }
+    function closeSettings() { document.getElementById('settings-panel').classList.remove('visible'); }
+
+    document.getElementById('btn-settings').addEventListener('click', openSettings);
+    document.getElementById('btn-ingame-settings').addEventListener('click', openSettings);
+    document.getElementById('btn-settings-back').addEventListener('click', closeSettings);
+
+    document.getElementById('set-sound').addEventListener('change', e => { soundEnabled = e.target.checked; });
+    document.getElementById('set-blood').addEventListener('change', e => { bloodEnabled = e.target.checked; });
+
+    document.getElementById('set-gravity').addEventListener('input', e => {
+      const val = parseFloat(e.target.value);
+      engine.gravity.y = val;
+      document.getElementById('gravity-val').textContent = val.toFixed(1) + '×';
+    });
+
+    document.querySelectorAll('.cap-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.cap-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        ragdollLimit = btn.dataset.val === 'Infinity' ? Infinity : parseInt(btn.dataset.val);
+      });
+    });
+
+    document.getElementById('btn-clear-all').addEventListener('click', () => {
+      ragdolls.forEach(r => {
+        r.parts.forEach(p => World.remove(world, p));
+        r.constraints.forEach(c => World.remove(world, c));
+      });
+      ragdolls = [];
+      spawnedProps.forEach(p => World.remove(world, p));
+      spawnedProps = [];
+      bloodParticles.length = 0;
+    });
+
+    // --- Engine setup ---
+    const engine = Engine.create({ gravity: { y: 1.5 } });
+    const world = engine.world;
+
+    const render = Render.create({
+      element: document.body,
+      engine,
+      options: { width: W, height: H, wireframes: false, background: '#1a1a2e' }
+    });
+
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    // --- Ragdoll builder ---
+    function makeRagdoll(x, y, typeName) {
+      const cfg = RAGDOLL_TYPES[typeName] || RAGDOLL_TYPES.normal;
+      const s = cfg.scale;
+      const ls = cfg.limbScale || {};
+      const armLen = (ls.armLen || 1.0);
+      const legLen = (ls.legLen || 1.0);
+      const armW   = (ls.armW   || 1.0);
+      const legW   = (ls.legW   || 1.0);
+      const c = cfg.colors;
+
+      const phys = (color, densityMult = 1) => ({
+        friction: cfg.friction,
+        restitution: cfg.restitution,
+        density: cfg.density * densityMult,
+        render: { fillStyle: color }
+      });
+
+      const headR = 13 * s;
+      const torsoW = 22 * s, torsoH = 38 * s;
+      const hipsW = 20 * s, hipsH = 14 * s;
+      const uArmW = 10 * s * armW, uArmH = 26 * s * armLen;
+      const lArmW = 9  * s * armW, lArmH = 24 * s * armLen;
+      const uLegW = 12 * s * legW, uLegH = 28 * s * legLen;
+      const lLegW = 11 * s * legW, lLegH = 26 * s * legLen;
+
+      const torsoY  = headR + torsoH / 2 + 4 * s;
+      const hipsY   = torsoY + torsoH / 2 + hipsH / 2 + 2 * s;
+      const uArmY   = torsoY - torsoH / 2 + uArmH / 2 + 2 * s;
+      const lArmY   = uArmY + uArmH / 2 + lArmH / 2;
+      const armOffX = torsoW / 2 + uArmW / 2 + 1 * s;
+      const uLegY   = hipsY + hipsH / 2 + uLegH / 2 + 2 * s;
+      const lLegY   = uLegY + uLegH / 2 + lLegH / 2;
+      const legOffX = hipsW / 2 - uLegW / 2 - 1 * s;
+
+      const head   = Bodies.circle(x, y, headR, phys(c.head));
+      const torso  = Bodies.rectangle(x, y + torsoY,  torsoW, torsoH,  phys(c.torso, 1.5));
+      const hips   = Bodies.rectangle(x, y + hipsY,   hipsW,  hipsH,   phys(c.hips));
+      const uArmL  = Bodies.rectangle(x - armOffX, y + uArmY, uArmW, uArmH, phys(c.arm));
+      const lArmL  = Bodies.rectangle(x - armOffX, y + lArmY, lArmW, lArmH, phys(c.arm));
+      const uArmR  = Bodies.rectangle(x + armOffX, y + uArmY, uArmW, uArmH, phys(c.arm));
+      const lArmR  = Bodies.rectangle(x + armOffX, y + lArmY, lArmW, lArmH, phys(c.arm));
+      const uLegL  = Bodies.rectangle(x - legOffX, y + uLegY, uLegW, uLegH, phys(c.legU));
+      const lLegL  = Bodies.rectangle(x - legOffX, y + lLegY, lLegW, lLegH, phys(c.legL));
+      const uLegR  = Bodies.rectangle(x + legOffX, y + uLegY, uLegW, uLegH, phys(c.legU));
+      const lLegR  = Bodies.rectangle(x + legOffX, y + lLegY, lLegW, lLegH, phys(c.legL));
+
+      const parts = [head, torso, hips, uArmL, lArmL, uArmR, lArmR, uLegL, lLegL, uLegR, lLegR];
+
+      const js = cfg.jointStiff;
+      function joint(bodyA, bodyB, ax, ay, bx, by, stiffness, length) {
+        return Constraint.create({
+          bodyA, bodyB,
+          pointA: { x: ax, y: ay },
+          pointB: { x: bx, y: by },
+          stiffness: stiffness * js,
+          length,
+          render: { visible: false }
+        });
+      }
+
+      const constraints = [
+        joint(head,  torso,  0,  headR,           0, -torsoH/2,      0.4, 2*s),
+        joint(torso, hips,   0,  torsoH/2,        0, -hipsH/2,       0.6, 2*s),
+        joint(torso, uArmL, -torsoW/2, -torsoH/4, uArmW/2, -uArmH/2, 0.3, 1*s),
+        joint(torso, uArmR,  torsoW/2, -torsoH/4,-uArmW/2, -uArmH/2, 0.3, 1*s),
+        joint(uArmL, lArmL,  0,  uArmH/2,         0, -lArmH/2,      0.4, 2*s),
+        joint(uArmR, lArmR,  0,  uArmH/2,         0, -lArmH/2,      0.4, 2*s),
+        joint(hips,  uLegL, -legOffX, hipsH/2,    0, -uLegH/2,      0.5, 2*s),
+        joint(hips,  uLegR,  legOffX, hipsH/2,    0, -uLegH/2,      0.5, 2*s),
+        joint(uLegL, lLegL,  0,  uLegH/2,         0, -lLegH/2,      0.5, 2*s),
+        joint(uLegR, lLegR,  0,  uLegH/2,         0, -lLegH/2,      0.5, 2*s),
+      ];
+
+      World.add(world, [...parts, ...constraints]);
+
+      const spin = (Math.random() - 0.5) * 0.3;
+      parts.forEach(p => {
+        Body.setAngularVelocity(p, spin);
+        p.isRagdollPart = true;
+      });
+
+      return { parts, constraints };
+    }
+
+    let ragdolls = [];
+
+    function spawnCurrent() {
+      const x = W * (0.2 + Math.random() * 0.6);
+      if (currentSelection.kind === 'ragdoll') {
+        if (ragdollLimit < Infinity) {
+          while (ragdolls.length >= ragdollLimit) {
+            const oldest = ragdolls.shift();
+            oldest.parts.forEach(p => World.remove(world, p));
+            oldest.constraints.forEach(c => World.remove(world, c));
+          }
+        }
+        ragdolls.push(makeRagdoll(x, -60, currentSelection.key));
+      } else {
+        const body = PROP_TYPES[currentSelection.key].spawn(x, -40);
+        World.add(world, body);
+        spawnedProps.push(body);
+      }
+      playWhoosh();
+    }
+
+    // --- Collision → blood + sound ---
+    Events.on(engine, 'collisionStart', (event) => {
+      for (const pair of event.pairs) {
+        const { bodyA, bodyB, collision } = pair;
+        const ragdoll = bodyA.isRagdollPart ? bodyA : bodyB.isRagdollPart ? bodyB : null;
+        if (!ragdoll) continue;
+        const speed = Math.sqrt(ragdoll.velocity.x ** 2 + ragdoll.velocity.y ** 2);
+        if (speed < 3) continue;
+        const cx = collision.supports[0]?.x ?? ragdoll.position.x;
+        const cy = collision.supports[0]?.y ?? ragdoll.position.y;
+        spawnBlood(cx, cy, speed);
+        if (speed > 14) playSplat(speed);
+        else playThud(speed);
+      }
+    });
+
+    Events.on(render, 'afterRender', () => { updateBlood(); drawBlood(); });
+
+    // --- Main menu logic ---
+    let gameStarted = false;
+
+    document.getElementById('btn-begin').addEventListener('click', () => {
+      gameStarted = true;
+
+      // Apply selected map background
+      const mapCfg = MAPS[selectedMap];
+      render.options.background = mapCfg.background;
+      document.body.style.background = mapCfg.background;
+
+      // Build the map's static bodies
+      mapCfg.build(world, W, H);
+
+      const menu = document.getElementById('menu');
+      menu.classList.add('hidden');
+      setTimeout(() => menu.remove(), 500);
+      document.getElementById('ui').style.display = '';
+      document.getElementById('controls').style.display = '';
+      document.getElementById('hud-btns').style.display = '';
+      spawnCurrent();
+    });
+
+    document.getElementById('btn-leave').addEventListener('click', () => {
+      window.close();
+      document.body.innerHTML = '<div style="color:#555;font-family:sans-serif;display:flex;height:100vh;align-items:center;justify-content:center;font-size:24px;">You can close this tab.</div>';
+    });
+
+    // --- Input ---
+    const mouse = Mouse.create(render.canvas);
+    const mc = MouseConstraint.create(engine, {
+      mouse,
+      constraint: { stiffness: 0.15, render: { visible: false } }
+    });
+    World.add(world, mc);
+    render.mouse = mouse;
+
+    render.canvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+    render.canvas.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
+    render.canvas.addEventListener('touchend',   e => e.preventDefault(), { passive: false });
+
+    let touchStartX = 0, touchStartY = 0, touchMoved = false;
+
+    render.canvas.addEventListener('touchstart', (e) => {
+      const t = e.touches[0];
+      touchStartX = t.clientX; touchStartY = t.clientY; touchMoved = false;
+      mouse.button = 0;
+      mouse.position.x = t.clientX;
+      mouse.position.y = t.clientY;
+      Mouse.setOffset(mouse, { x: 0, y: 0 });
+    }, { passive: false });
+
+    render.canvas.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      const dx = t.clientX - touchStartX, dy = t.clientY - touchStartY;
+      if (Math.sqrt(dx*dx + dy*dy) > 10) touchMoved = true;
+      mouse.position.x = t.clientX;
+      mouse.position.y = t.clientY;
+    }, { passive: false });
+
+    render.canvas.addEventListener('touchend', (e) => {
+      mouse.button = -1;
+      if (!touchMoved && gameStarted) spawnCurrent();
+    }, { passive: false });
+
+    render.canvas.addEventListener('click', () => { if (gameStarted) spawnCurrent(); });
+  </script>
+</body>
+</html>
